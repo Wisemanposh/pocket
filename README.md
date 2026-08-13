@@ -3,6 +3,8 @@
 A chord-and-melody pocket instrument. A small hardware-style chassis in the tradition of handheld groove
 boxes: chord pads and melody pads over an always-on tape track, with a 4-track and an editor to come.
 
+<img src="docs/media/pocket.png" width="356" alt="The Pocket instrument running in a browser: an LCD strip reading KEY Cm and 92 BPM, eight chord pads with one lit, a row of melody pads, four knobs for shape, filter, attack and release, and REC / PLAY / STOP transport controls on a yellow chassis.">
+
 ## Status
 
 **v0.2.2 "First Playable"** Chord pads, melody pads, single tape track, REC/PLAY/STOP, WAV export. MacOS desktop (Tauri) + standalone web. SEQ / TAPE-editor / FX / multi-track / mobile are later versions.
@@ -47,6 +49,9 @@ If you hear noticeable latency, you're probably on Bluetooth audio (AirPods etc.
 - `apps/web`, the instrument (Vite)
 - `apps/desktop` Tauri 2 wrapper for macOS
 
+If you want to read rather than run, start with `packages/model/src/music.ts` for the chord and scale
+theory, and `packages/engine/src/AudioEngine.ts` for the audio graph. The tape track is
+`packages/engine/src/ringbuffer.ts` and the export path is `wav.ts`. Those four carry the ideas.
 
 ## How this was built
 
