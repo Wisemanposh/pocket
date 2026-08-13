@@ -1,0 +1,29 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.dialog {
+  background: #1a1a1a;
+  border: 2px solid var(--device-yellow);
+  border-radius: 6px;
+  padding: 16px;
+  min-width: 220px;
+  max-width: 90vw;
+  max-height: 80vh;
+  overflow: auto;
+  color: var(--device-yellow);
+  font-family: var(--device-font);
+}
+.title {
+  font-size: 10px;
+  letter-spacing: var(--label-letter-spacing);
+  font-weight: bold;
+  opacity: 0.7;
+  margin-bottom: 10px;
+  text-transform: uppercase;
+}

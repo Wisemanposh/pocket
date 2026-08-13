@@ -1,0 +1,25 @@
+.strip {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  align-items: center;
+  padding: 2px 0;
+}
+.chip {
+  background: #1a1a1a;
+  color: var(--device-yellow);
+  font-family: var(--device-font);
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  border: 1px solid #333;
+  cursor: pointer;
+}
+.metroOn {
+  background: var(--device-yellow);
+  color: var(--device-black);
+  box-shadow: 0 0 8px var(--device-yellow);
+  border-color: var(--device-yellow);
+}

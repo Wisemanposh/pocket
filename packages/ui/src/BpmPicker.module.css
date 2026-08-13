@@ -1,0 +1,35 @@
+.row {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+}
+.tap {
+  flex: 1;
+  background: #2a2a2a;
+  color: var(--device-yellow);
+  font-family: var(--device-font);
+  font-size: 14px;
+  font-weight: bold;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  padding: 18px;
+}
+.tap:active {
+  background: var(--device-yellow);
+  color: var(--device-black);
+}
+.value {
+  background: #1a1a1a;
+  color: var(--device-yellow);
+  font-family: var(--device-font);
+  font-size: 28px;
+  font-weight: bold;
+  padding: 12px 20px;
+  border-radius: 3px;
+  border: 1px solid #333;
+  text-align: center;
+  user-select: none;
+  cursor: ns-resize;
+  min-width: 70px;
+}

@@ -1,0 +1,14 @@
+:root {
+  --device-yellow: #f6d83b;
+  --device-yellow-dark: #c4a820;
+  --device-yellow-stroke: #d4b820;
+  --device-black: #1a1a1a;
+  --device-black-deep: #0a0a0a;
+  --device-orange: #ff6b1a;
+  --device-red: #ff4040;
+  --lcd-bg: #5a6650;
+  --lcd-text: #d6dfb6;
+  --lcd-stroke: #2c3328;
+  --device-font: "Courier New", ui-monospace, monospace;
+  --label-letter-spacing: 1.5px;
+}

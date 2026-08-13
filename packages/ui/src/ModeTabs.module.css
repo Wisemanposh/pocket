@@ -1,0 +1,25 @@
+.tabs {
+  display: flex;
+  gap: 3px;
+  justify-content: center;
+}
+.tab {
+  background: #2a2a2a;
+  color: var(--device-yellow);
+  padding: 4px 10px;
+  font-family: var(--device-font);
+  font-size: 9px;
+  font-weight: bold;
+  letter-spacing: 1.5px;
+  border-radius: 2px;
+  border: none;
+  cursor: pointer;
+}
+.tab.active {
+  background: var(--device-yellow);
+  color: var(--device-black);
+}
+.tab.disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}

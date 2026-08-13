@@ -1,0 +1,31 @@
+.pad {
+  background: var(--device-black);
+  color: var(--device-yellow);
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--device-font);
+  font-size: 12px;
+  font-weight: bold;
+  border-radius: 3px;
+  border: none;
+  cursor: pointer;
+  text-shadow: 0 0 4px rgba(246, 216, 59, 0.4);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.lit {
+  background: var(--device-yellow);
+  color: var(--device-black);
+  box-shadow: 0 0 10px var(--device-yellow);
+  text-shadow: none;
+}
+.chord {
+  background: #2a2a2a;
+}
+.chord.lit {
+  background: var(--device-orange);
+  color: #fff;
+  box-shadow: 0 0 10px var(--device-orange);
+}

@@ -1,0 +1,33 @@
+.knob {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, #3a3a3a, var(--device-black-deep));
+  box-shadow: 0 2px 0 #000;
+  position: relative;
+}
+.knob::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  left: 50%;
+  width: 3px;
+  height: 10px;
+  background: var(--device-yellow);
+  transform: translateX(-50%) rotate(var(--angle, 0deg));
+  transform-origin: 50% 80%;
+  border-radius: 1px;
+}
+.label {
+  font-family: var(--device-font);
+  font-size: 8px;
+  letter-spacing: var(--label-letter-spacing);
+  font-weight: bold;
+  text-align: center;
+  margin-top: 4px;
+}
+.cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
