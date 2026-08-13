@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi } from "vitest";
 import { Pad } from "./Pad";
@@ -28,5 +28,28 @@ describe("Pad", () => {
     render(<Pad label="I" lit onPress={() => {}} onRelease={() => {}} />);
     const btn = screen.getByRole("button", { name: "I" });
     expect(btn.className).toMatch(/lit/);
+  });
+
+  it("plays for the full duration of a keyboard hold without key-repeat retriggers", () => {
+    const onPress = vi.fn();
+    const onRelease = vi.fn();
+    render(<Pad label="I" onPress={onPress} onRelease={onRelease} />);
+    const btn = screen.getByRole("button", { name: "I" });
+
+    fireEvent.keyDown(btn, { key: " " });
+    fireEvent.keyDown(btn, { key: " ", repeat: true });
+    expect(onPress).toHaveBeenCalledTimes(1);
+    expect(onRelease).not.toHaveBeenCalled();
+
+    fireEvent.keyUp(btn, { key: " " });
+    expect(onRelease).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases a held note if the window loses focus", () => {
+    const onRelease = vi.fn();
+    render(<Pad label="I" onPress={() => {}} onRelease={onRelease} />);
+    fireEvent.keyDown(screen.getByRole("button", { name: "I" }), { key: "Enter" });
+    fireEvent.blur(window);
+    expect(onRelease).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi } from "vitest";
 import { ChordPadGrid } from "./ChordPadGrid";
@@ -38,5 +38,17 @@ describe("ChordPadGrid", () => {
     await user.pointer({ keys: "[MouseLeft>]", target: v7Pad });
     expect(onPress).toHaveBeenCalledWith(4, true);
     await user.pointer({ keys: "[/MouseLeft]" });
+  });
+
+  it("keeps independently held pads lit", () => {
+    render(<ChordPadGrid mode="major" onPress={() => {}} onRelease={() => {}} />);
+    const first = screen.getByRole("button", { name: "I" });
+    const fourth = screen.getByRole("button", { name: "IV" });
+    fireEvent.keyDown(first, { key: " " });
+    fireEvent.keyDown(fourth, { key: " " });
+    expect(first.className).toMatch(/lit/);
+    expect(fourth.className).toMatch(/lit/);
+    fireEvent.keyUp(first, { key: " " });
+    fireEvent.keyUp(fourth, { key: " " });
   });
 });

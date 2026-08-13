@@ -14,6 +14,11 @@
   text-shadow: 0 0 4px rgba(246, 216, 59, 0.4);
   user-select: none;
   -webkit-user-select: none;
+  touch-action: none;
+}
+.pad:focus-visible {
+  outline: 2px solid var(--device-orange);
+  outline-offset: 2px;
 }
 .lit {
   background: var(--device-yellow);

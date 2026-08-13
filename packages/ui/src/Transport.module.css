@@ -13,6 +13,14 @@
   border: none;
   cursor: pointer;
 }
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+.btn:focus-visible {
+  outline: 2px solid var(--device-orange);
+  outline-offset: 2px;
+}
 .rec {
   color: var(--device-red);
 }
@@ -20,4 +28,7 @@
   background: var(--device-red);
   color: #fff;
   box-shadow: 0 0 10px var(--device-red);
+}
+.rec.active:disabled {
+  opacity: 1;
 }

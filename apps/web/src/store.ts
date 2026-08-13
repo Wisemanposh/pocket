@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { KeyCenter, VoiceId, Region, QuantizeSettings } from "@pocket/model";
+import { DEFAULT_MACROS, type MacroValues } from "@pocket/engine";
 
 export interface AppState {
   key: KeyCenter;
@@ -8,20 +9,18 @@ export interface AppState {
   voiceId: VoiceId;
   recording: boolean;
   lastRegion: Region | null;
-  litChordPosition: number | null;
-  litMelodyIndex: number | null;
   metronome: boolean;
   quantize: QuantizeSettings;
+  macros: MacroValues;
 
   setKey: (k: KeyCenter) => void;
   setVoice: (v: VoiceId) => void;
   setRecording: (b: boolean) => void;
   setLastRegion: (r: Region) => void;
-  setLitChordPosition: (i: number | null) => void;
-  setLitMelodyIndex: (i: number | null) => void;
   setMetronome: (b: boolean) => void;
   setQuantize: (q: QuantizeSettings) => void;
   setBpm: (b: number) => void;
+  setMacro: (name: keyof MacroValues, value: number) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -31,18 +30,16 @@ export const useAppStore = create<AppState>((set) => ({
   voiceId: "dx-piano",
   recording: false,
   lastRegion: null,
-  litChordPosition: null,
-  litMelodyIndex: null,
   metronome: false,
   quantize: { strength: 0.75, gridDivision: "1/8" },
+  macros: { ...DEFAULT_MACROS },
 
   setKey: (k) => set({ key: k }),
   setVoice: (v) => set({ voiceId: v }),
   setRecording: (b) => set({ recording: b }),
   setLastRegion: (r) => set({ lastRegion: r }),
-  setLitChordPosition: (i) => set({ litChordPosition: i }),
-  setLitMelodyIndex: (i) => set({ litMelodyIndex: i }),
   setMetronome: (b) => set({ metronome: b }),
   setQuantize: (q) => set({ quantize: q }),
   setBpm: (b) => set({ bpm: b }),
+  setMacro: (name, value) => set((state) => ({ macros: { ...state.macros, [name]: value } })),
 }));

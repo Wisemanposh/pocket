@@ -30,4 +30,19 @@ describe("Transport", () => {
     const rec = screen.getByRole("button", { name: /rec/i });
     expect(rec.className).toMatch(/active/);
   });
+
+  it("disables unavailable transport actions", () => {
+    render(
+      <Transport
+        recording={false}
+        canPlay={false}
+        canStop={false}
+        onRec={() => {}}
+        onPlay={() => {}}
+        onStop={() => {}}
+      />
+    );
+    expect(screen.getByRole("button", { name: /play/i }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: /stop/i }).hasAttribute("disabled")).toBe(true);
+  });
 });

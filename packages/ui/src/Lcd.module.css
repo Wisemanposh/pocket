@@ -11,10 +11,25 @@
   justify-content: space-between;
   gap: 12px;
 }
-.field { white-space: nowrap; }
+.field {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  margin: 0;
+  padding: 0;
+  white-space: nowrap;
+}
+.field:disabled { opacity: 1; }
 .clickable {
   cursor: pointer;
 }
 .clickable:hover {
   text-decoration: underline dotted var(--lcd-text);
+}
+.clickable:focus-visible {
+  outline: 1px dotted var(--lcd-text);
+  outline-offset: 3px;
 }

@@ -35,21 +35,25 @@ const LABELS: Record<"major" | "minor", ReadonlyArray<{ label: string; degree: n
 export function ChordPadGrid({ mode, onPress, onRelease }: ChordPadGridProps) {
   const items = LABELS[mode];
   // Lit state is owned here so V and V7 (which share degree=4) light independently.
-  const [litPosition, setLitPosition] = useState<number | null>(null);
+  const [litPositions, setLitPositions] = useState<Set<number>>(() => new Set());
   return (
     <div className={styles.grid}>
       {items.map(({ label, degree, seventh }, i) => (
         <Pad
           key={`${label}-${i}`}
           label={label}
-          lit={litPosition === i}
+          lit={litPositions.has(i)}
           variant="chord"
           onPress={() => {
-            setLitPosition(i);
+            setLitPositions((current) => new Set(current).add(i));
             onPress(degree, seventh);
           }}
           onRelease={() => {
-            setLitPosition((cur) => (cur === i ? null : cur));
+            setLitPositions((current) => {
+              const next = new Set(current);
+              next.delete(i);
+              return next;
+            });
             onRelease(degree, seventh);
           }}
         />

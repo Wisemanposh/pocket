@@ -14,18 +14,24 @@ export function Lcd({ transport, key2, voice, onClickField }: LcdProps) {
   const cls = clickable ? `${styles.field} ${styles.clickable}` : styles.field;
   return (
     <div className={styles.lcd}>
-      <span
+      <button
+        type="button"
         className={cls}
-        onClick={clickable ? () => onClickField!("transport") : undefined}
-      >{transport}</span>
-      <span
+        disabled={!clickable}
+        onClick={() => onClickField?.("transport")}
+      >{transport}</button>
+      <button
+        type="button"
         className={cls}
-        onClick={clickable ? () => onClickField!("key") : undefined}
-      >{key2}</span>
-      <span
+        disabled={!clickable}
+        onClick={() => onClickField?.("key")}
+      >{key2}</button>
+      <button
+        type="button"
         className={cls}
-        onClick={clickable ? () => onClickField!("voice") : undefined}
-      >{voice}</span>
+        disabled={!clickable}
+        onClick={() => onClickField?.("voice")}
+      >{voice}</button>
     </div>
   );
 }

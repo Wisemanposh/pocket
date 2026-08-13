@@ -27,25 +27,33 @@ export function TimeStrip({
   const [slider, setSlider] = useState(false);
   const downPos = useRef({ x: 0, y: 0 });
   const longPress = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressTriggered = useRef(false);
+
+  const cancelLongPress = () => {
+    if (longPress.current) clearTimeout(longPress.current);
+    longPress.current = null;
+  };
 
   const onPointerDown = (e: React.PointerEvent) => {
     downPos.current = { x: e.clientX, y: e.clientY };
-    longPress.current = setTimeout(() => setSlider(true), 300);
+    longPressTriggered.current = false;
+    cancelLongPress();
+    longPress.current = setTimeout(() => {
+      longPress.current = null;
+      longPressTriggered.current = true;
+      setSlider(true);
+    }, 300);
   };
   const onPointerMove = (e: React.PointerEvent) => {
     const dx = Math.abs(e.clientX - downPos.current.x);
     const dy = Math.abs(e.clientY - downPos.current.y);
-    if (dx + dy > 8 && longPress.current) {
-      clearTimeout(longPress.current);
-      longPress.current = null;
-    }
+    if (dx + dy > 8) cancelLongPress();
   };
   const onPointerUp = () => {
-    if (longPress.current) {
-      clearTimeout(longPress.current);
-      longPress.current = null;
-      onCycleQuant();
-    }
+    const shouldCycle = longPress.current !== null && !longPressTriggered.current;
+    cancelLongPress();
+    if (shouldCycle) onCycleQuant();
+    longPressTriggered.current = false;
   };
 
   return (
@@ -65,6 +73,10 @@ export function TimeStrip({
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
+          onPointerCancel={() => {
+            cancelLongPress();
+            longPressTriggered.current = false;
+          }}
           aria-label={`quant ${formatQuant(quantStrength)}`}
         >
           QUANT {formatQuant(quantStrength)}

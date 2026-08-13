@@ -28,7 +28,7 @@ export function Modal({ open, onClose, title, children }: ModalProps) {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className={styles.dialog} role="dialog" aria-label={title}>
+      <div className={styles.dialog} role="dialog" aria-modal="true" aria-label={title}>
         <div className={styles.title}>{title}</div>
         {children}
       </div>

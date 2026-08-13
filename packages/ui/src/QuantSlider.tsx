@@ -15,15 +15,19 @@ export function QuantSlider({ value, onChange, onCommit }: QuantSliderProps) {
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const handle = (e: PointerEvent) => {
+    const valueAt = (e: PointerEvent) => {
       const rect = el.getBoundingClientRect();
+      if (rect.height <= 0 || !Number.isFinite(e.clientY)) return valueRef.current;
       const y = Math.max(0, Math.min(rect.height, e.clientY - rect.top));
-      const v = 1 - y / rect.height;
-      onChange(Math.max(0, Math.min(1, v)));
+      return Math.max(0, Math.min(1, 1 - y / rect.height));
+    };
+    const handle = (e: PointerEvent) => {
+      onChange(valueAt(e));
     };
     const up = (e: PointerEvent) => {
-      handle(e);
-      onCommit(valueRef.current);
+      const next = valueAt(e);
+      onChange(next);
+      onCommit(next);
       window.removeEventListener("pointermove", handle);
       window.removeEventListener("pointerup", up);
     };

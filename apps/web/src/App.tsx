@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AudioEngine, VOICES } from "@pocket/engine";
-import { chordAtDegree, scaleNotes, type Chord, type GridDivision } from "@pocket/model";
+import { AudioEngine, VOICES, type MacroValues } from "@pocket/engine";
+import { chordAtDegree, scaleNotes, type GridDivision } from "@pocket/model";
 import {
   BpmPicker,
   ChordPadGrid,
@@ -29,111 +29,164 @@ function noteLabel(midi: number): string {
   return NOTE_NAMES[midi % 12] ?? "?";
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "An unexpected audio error occurred.";
+}
+
 export function App() {
   const [engine, setEngine] = useState<AudioEngine | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [playing, setPlaying] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [transportText, setTransportText] = useState("▶ 00:00");
-  const activeChord = useRef<Chord | null>(null);
-  const heldMidi = useRef<Set<number>>(new Set());
-
+  const heldInputs = useRef(new Map<string, number[]>());
+  const lastRecordedText = useRef("▶ 00:00");
   const [modal, setModal] = useState<null | "key" | "bpm" | "voice">(null);
 
   const {
-    key, tonicMidi, bpm, voiceId,
-    recording, lastRegion,
-    litMelodyIndex,
-    metronome, quantize,
-    setKey, setVoice,
-    setRecording, setLastRegion,
-    setLitMelodyIndex,
-    setMetronome, setQuantize, setBpm,
+    key,
+    tonicMidi,
+    bpm,
+    voiceId,
+    recording,
+    lastRegion,
+    metronome,
+    quantize,
+    macros,
+    setKey,
+    setVoice,
+    setRecording,
+    setLastRegion,
+    setMetronome,
+    setQuantize,
+    setBpm,
+    setMacro,
   } = useAppStore();
 
-  const startEngine = async () => {
-    const eng = new AudioEngine();
-    await eng.start();
-    eng.setActiveTrack(1);
-    eng.setBpm(bpm);
-    eng.setQuantize(quantize);
-    eng.setMetronome(metronome);
-    eng.onRegion((r) => setLastRegion(r));
-    setEngine(eng);
+  const releaseInput = (inputId: string) => {
+    const noteIds = heldInputs.current.get(inputId);
+    if (!engine || !noteIds) return;
+    heldInputs.current.delete(inputId);
+    for (const noteId of noteIds) engine.noteOff(noteId);
   };
 
+  const releaseAllInputs = () => {
+    if (!engine) return;
+    for (const noteIds of heldInputs.current.values()) {
+      for (const noteId of noteIds) engine.noteOff(noteId);
+    }
+    heldInputs.current.clear();
+  };
+
+  useEffect(() => {
+    if (!engine) return;
+    const onVisibility = () => {
+      if (document.hidden) releaseAllInputs();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      releaseAllInputs();
+      void engine.dispose();
+    };
+  }, [engine]);
+
+  const startEngine = async () => {
+    if (starting || engine) return;
+    setStarting(true);
+    setError(null);
+    const nextEngine = new AudioEngine();
+    try {
+      await nextEngine.start();
+      nextEngine.setActiveTrack(1);
+      nextEngine.setBpm(bpm);
+      nextEngine.setQuantize(quantize);
+      nextEngine.setMetronome(metronome);
+      nextEngine.setMacros(macros);
+      nextEngine.onRegion((region) => setLastRegion(region));
+      nextEngine.onPlaybackState(setPlaying);
+      setEngine(nextEngine);
+    } catch (startError) {
+      await nextEngine.dispose().catch(() => undefined);
+      setError(errorMessage(startError));
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  const selectedVoice = useMemo(
+    () => VOICES.find((voice) => voice.id === voiceId) ?? VOICES[0]!,
+    [voiceId]
+  );
+
   const melodyLabels = useMemo(() => {
+    if (selectedVoice.drumKit) return Array.from({ length: 8 }, (_, index) => `D${index + 1}`);
     const scale = scaleNotes(key, tonicMidi);
     return [...scale, scale[0]! + 12].map(noteLabel);
-  }, [key, tonicMidi]);
-
-  const lastRecordedText = useRef("▶ 00:00");
+  }, [key, selectedVoice, tonicMidi]);
 
   useEffect(() => {
     if (!recording) {
-      // Freeze on whatever the last shown time was (00:00 on first load,
-      // the duration of the most recent take after STOP).
-      setTransportText(lastRecordedText.current.replace("● REC ", "▶ "));
+      setTransportText(playing ? "▶ PLAY" : lastRecordedText.current.replace("● REC ", "▶ "));
       return;
     }
-    let raf = 0;
+    let frame = 0;
     const start = performance.now();
     const tick = () => {
-      const sec = Math.floor((performance.now() - start) / 1000);
-      const m = String(Math.floor(sec / 60)).padStart(2, "0");
-      const s = String(sec % 60).padStart(2, "0");
-      const text = `● REC ${m}:${s}`;
+      const seconds = Math.floor((performance.now() - start) / 1000);
+      const minutesText = String(Math.floor(seconds / 60)).padStart(2, "0");
+      const secondsText = String(seconds % 60).padStart(2, "0");
+      const text = `● REC ${minutesText}:${secondsText}`;
       lastRecordedText.current = text;
       setTransportText(text);
-      raf = requestAnimationFrame(tick);
+      frame = requestAnimationFrame(tick);
     };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [recording]);
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [playing, recording]);
 
   const handleChordPress = (degree: number, seventh: boolean) => {
     if (!engine) return;
-    const chord = chordAtDegree(key, degree as 0 | 1 | 2 | 3 | 4 | 5 | 6, tonicMidi, { seventh });
-    activeChord.current = chord;
-    for (const n of chord.notes) {
-      engine.noteOn(voiceId, n);
-      heldMidi.current.add(n);
-    }
+    const inputId = `chord:${degree}:${seventh}`;
+    if (heldInputs.current.has(inputId)) return;
+    const midiNotes = selectedVoice.drumKit
+      ? [selectedVoice.rootMidi + (seventh ? 7 : degree)]
+      : chordAtDegree(key, degree as 0 | 1 | 2 | 3 | 4 | 5 | 6, tonicMidi, { seventh }).notes;
+    heldInputs.current.set(
+      inputId,
+      midiNotes.map((midi) => engine.noteOn(voiceId, midi))
+    );
   };
 
-  const handleChordRelease = (degree: number, seventh: boolean) => {
+  const handleMelodyPress = (index: number) => {
     if (!engine) return;
-    const chord = chordAtDegree(key, degree as 0 | 1 | 2 | 3 | 4 | 5 | 6, tonicMidi, { seventh });
-    for (const n of chord.notes) {
-      engine.noteOff(voiceId, n);
-      heldMidi.current.delete(n);
-    }
-  };
-
-  const handleMelodyPress = (i: number) => {
-    if (!engine) return;
+    const inputId = `melody:${index}`;
+    if (heldInputs.current.has(inputId)) return;
     const scale = scaleNotes(key, tonicMidi);
-    const midi = i < scale.length ? scale[i]! : scale[0]! + 12;
-    engine.noteOn(voiceId, midi);
-    heldMidi.current.add(midi);
-    setLitMelodyIndex(i);
-  };
-
-  const handleMelodyRelease = (i: number) => {
-    if (!engine) return;
-    const scale = scaleNotes(key, tonicMidi);
-    const midi = i < scale.length ? scale[i]! : scale[0]! + 12;
-    engine.noteOff(voiceId, midi);
-    heldMidi.current.delete(midi);
-    if (litMelodyIndex === i) setLitMelodyIndex(null);
+    const midi = selectedVoice.drumKit
+      ? selectedVoice.rootMidi + index
+      : index < scale.length
+        ? scale[index]!
+        : scale[0]! + 12;
+    heldInputs.current.set(inputId, [engine.noteOn(voiceId, midi)]);
   };
 
   const handleRec = () => {
     if (!engine || recording) return;
+    setError(null);
     engine.startRecording();
     setRecording(true);
   };
 
   const handlePlay = async () => {
-    if (!engine || !lastRegion) return;
-    await engine.playRegionWithQuantize(lastRegion);
+    if (!engine || !lastRegion || recording) return;
+    setError(null);
+    try {
+      await engine.playRegionWithQuantize(lastRegion);
+    } catch (playError) {
+      setError(errorMessage(playError));
+    }
   };
 
   const handleToggleMetro = () => {
@@ -145,20 +198,20 @@ export function App() {
 
   const handleCycleQuant = () => {
     if (!engine) return;
-    const i = QUANT_STEPS.findIndex((s) => Math.abs(s - quantize.strength) < 1e-3);
-    const nextStrength = QUANT_STEPS[(i + 1) % QUANT_STEPS.length]!;
-    const nextQ = { ...quantize, strength: nextStrength };
-    setQuantize(nextQ);
-    engine.setQuantize(nextQ);
+    const index = QUANT_STEPS.findIndex((strength) => Math.abs(strength - quantize.strength) < 1e-3);
+    const nextStrength = QUANT_STEPS[(index + 1) % QUANT_STEPS.length]!;
+    const next = { ...quantize, strength: nextStrength };
+    setQuantize(next);
+    engine.setQuantize(next);
   };
 
   const handleCycleGrid = () => {
     if (!engine) return;
-    const i = GRID_STEPS.indexOf(quantize.gridDivision);
-    const next = GRID_STEPS[(i + 1) % GRID_STEPS.length]!;
-    const nextQ = { ...quantize, gridDivision: next };
-    setQuantize(nextQ);
-    engine.setQuantize(nextQ);
+    const index = GRID_STEPS.indexOf(quantize.gridDivision);
+    const nextDivision = GRID_STEPS[(index + 1) % GRID_STEPS.length]!;
+    const next = { ...quantize, gridDivision: nextDivision };
+    setQuantize(next);
+    engine.setQuantize(next);
   };
 
   const handleStop = () => {
@@ -166,27 +219,50 @@ export function App() {
     if (recording) {
       engine.stopRecording();
       setRecording(false);
+    } else {
+      engine.stopPlayback();
     }
   };
 
   const handleExport = async () => {
-    if (!engine || !lastRegion) return;
-    const wav = await engine.exportRegionAsWav(lastRegion);
-    const blob = new Blob([wav], { type: "audio/wav" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `pocket-${Date.now()}.wav`;
-    a.click();
-    URL.revokeObjectURL(url);
+    if (!engine || !lastRegion || exporting) return;
+    setExporting(true);
+    setError(null);
+    try {
+      const wav = await engine.exportRegionAsWav(lastRegion);
+      const blob = new Blob([wav], { type: "audio/wav" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `pocket-${Date.now()}.wav`;
+      anchor.hidden = true;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (exportError) {
+      setError(errorMessage(exportError));
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleMacroChange = (name: keyof MacroValues, value: number) => {
+    if (!engine) return;
+    const next = { ...useAppStore.getState().macros, [name]: value };
+    setMacro(name, value);
+    engine.setMacros(next);
   };
 
   if (!engine) {
     return (
       <div className={styles.shell}>
-        <button className={styles.startBtn} onClick={startEngine}>
-          ▶  START POCKET
-        </button>
+        <div className={styles.bootPanel}>
+          <button className={styles.startBtn} onClick={() => void startEngine()} disabled={starting}>
+            {starting ? "STARTING…" : error ? "↻  RETRY POCKET" : "▶  START POCKET"}
+          </button>
+          {error && <div className={styles.error} role="alert">{error}</div>}
+        </div>
       </div>
     );
   }
@@ -198,25 +274,25 @@ export function App() {
           transport={transportText}
           key2={`KEY ${keyDisplay(key.root, key.mode)} ♩=${bpm}`}
           voice={`VOICE: ${voiceId.toUpperCase()}`}
-          onClickField={(f) => {
-            if (f === "key" || f === "voice") setModal(f);
-            else if (f === "transport") setModal("bpm");
+          onClickField={(field) => {
+            if (field === "key" || field === "voice") setModal(field);
+            else setModal("bpm");
           }}
         />
+        {error && <div className={styles.error} role="alert">{error}</div>}
         <div className={styles.label}>CHORDS</div>
         <ChordPadGrid
           mode={key.mode}
           onPress={handleChordPress}
-          onRelease={handleChordRelease}
+          onRelease={(degree, seventh) => releaseInput(`chord:${degree}:${seventh}`)}
         />
         <div className={styles.label}>MELODY</div>
         <MelodyPadRow
           labels={melodyLabels}
-          litIndex={litMelodyIndex ?? undefined}
           onPress={handleMelodyPress}
-          onRelease={handleMelodyRelease}
+          onRelease={(index) => releaseInput(`melody:${index}`)}
         />
-        <KnobRow />
+        <KnobRow values={macros} onChange={handleMacroChange} />
         <ModeTabs active="CHRD" enabled={["CHRD"]} />
         <TimeStrip
           metroOn={metronome}
@@ -225,35 +301,48 @@ export function App() {
           onToggleMetro={handleToggleMetro}
           onCycleQuant={handleCycleQuant}
           onCycleGrid={handleCycleGrid}
-          onQuantChange={(v) => {
-            const nextQ = { ...quantize, strength: v };
-            setQuantize(nextQ);
-            engine?.setQuantize(nextQ);
+          onQuantChange={(value) => {
+            const next = { ...quantize, strength: value };
+            setQuantize(next);
+            engine.setQuantize(next);
           }}
-          onQuantCommit={(v) => {
-            const nextQ = { ...quantize, strength: v };
-            setQuantize(nextQ);
-            engine?.setQuantize(nextQ);
+          onQuantCommit={(value) => {
+            const next = { ...quantize, strength: value };
+            setQuantize(next);
+            engine.setQuantize(next);
           }}
         />
-        <Transport recording={recording} onRec={handleRec} onPlay={handlePlay} onStop={handleStop} />
+        <Transport
+          recording={recording}
+          canPlay={!!lastRegion && !recording}
+          canStop={recording || playing}
+          onRec={handleRec}
+          onPlay={() => void handlePlay()}
+          onStop={handleStop}
+        />
         <button
           className={styles.startBtn}
           style={{ fontSize: 11, padding: "6px 10px" }}
-          onClick={handleExport}
-          disabled={!lastRegion}
+          onClick={() => void handleExport()}
+          disabled={!lastRegion || recording || exporting}
         >
-          BOUNCE → WAV
+          {exporting ? "BOUNCING…" : "BOUNCE → WAV"}
         </button>
         <Modal open={modal === "key"} onClose={() => setModal(null)} title="KEY">
-          <KeyPicker value={key} onChange={(k) => setKey(k)} />
+          <KeyPicker
+            value={key}
+            onChange={(nextKey) => {
+              releaseAllInputs();
+              setKey(nextKey);
+            }}
+          />
         </Modal>
         <Modal open={modal === "bpm"} onClose={() => setModal(null)} title="BPM">
           <BpmPicker
             value={bpm}
-            onChange={(b) => {
-              setBpm(b);
-              engine?.setBpm(b);
+            onChange={(nextBpm) => {
+              setBpm(nextBpm);
+              engine.setBpm(nextBpm);
             }}
           />
         </Modal>
@@ -261,8 +350,9 @@ export function App() {
           <VoicePicker
             voices={VOICES.map(({ id, displayName }) => ({ id, displayName }))}
             selectedId={voiceId}
-            onChange={(id) => {
-              setVoice(id);
+            onChange={(nextVoice) => {
+              releaseAllInputs();
+              setVoice(nextVoice);
               setModal(null);
             }}
           />
