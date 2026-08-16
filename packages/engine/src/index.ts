@@ -5,3 +5,5 @@ export * from "./voices";
 export * from "./AudioEngine";
 export * from "./quantize";
 export * from "./macros";
+export * from "./fx";
+export * from "./mix";

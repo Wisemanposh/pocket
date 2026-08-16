@@ -1,0 +1,12 @@
+.panel {
+  background: var(--device-black);
+  border: 2px solid var(--lcd-stroke);
+  border-radius: 3px;
+  color: var(--device-yellow);
+  font-family: var(--device-font);
+  padding: 12px 10px 10px;
+}
+.heading { display: flex; font-size: 8px; justify-content: space-between; letter-spacing: 1.2px; opacity: 0.65; }
+.grid { display: grid; gap: 16px; grid-template-columns: repeat(2, 1fr); padding: 18px 28px 10px; }
+.grid > div > div:first-child { height: 54px; width: 54px; }
+.note { border-top: 1px dashed #494949; font-size: 7px; letter-spacing: 0.7px; margin: 8px 0 0; opacity: 0.55; padding-top: 7px; text-align: center; }

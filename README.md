@@ -1,15 +1,15 @@
 # Pocket
 
 A chord-and-melody pocket instrument. A small hardware-style chassis in the tradition of handheld groove
-boxes: chord pads and melody pads over an always-on tape track, with a 4-track and an editor to come.
+boxes: playable chord and melody pads, a 16-step sequencer, four-track tape, and live master effects.
 
 <img src="docs/media/pocket.png" width="356" alt="The Pocket instrument running in a browser: an LCD strip reading KEY Cm and 92 BPM, eight chord pads with one lit, a row of melody pads, four knobs for shape, filter, attack and release, and REC / PLAY / STOP transport controls on a yellow chassis.">
 
 ## Status
 
-**v0.2.2 "First Playable"** Chord pads, melody pads, single tape track, REC/PLAY/STOP, WAV export. MacOS desktop (Tauri) + standalone web. SEQ / TAPE-editor / FX / multi-track / mobile are later versions.
+The current build includes chord and melody performance, four voices, a 16-step sequencer, four armed tape tracks with mute/solo/volume controls, tempo-synced delay, reverb, saturation, wow/flutter, REC/PLAY/STOP, and stereo mix bounce to WAV. It runs as a macOS desktop app (Tauri) or standalone web app.
 
-This is an early prototype, not a finished product. The `localhost` address below is a local development server, not a hosted demo.
+The `localhost` address below is a local development server, not a hosted demo.
 
 ## Develop
 
@@ -30,14 +30,15 @@ pnpm --filter @pocket/desktop build
 # Output: apps/desktop/src-tauri/target/release/bundle/dmg/Pocket_0.2.2_*.dmg
 ```
 
-## Acceptance flow (v0.2.2)
+## Acceptance flow
 
 1. Boot the app (web or desktop).
 2. Click **START POCKET** Web Audio requires a user gesture before the engine boots.
 3. Tap chord pads → hear chords. Tap melody pads → hear notes in the same key.
-4. **REC** arms tape track 1. Play. **STOP** ends the take.
-5. **PLAY** plays the take back.
-6. **BOUNCE → WAV** downloads the take as a 16-bit stereo WAV.
+4. Open **SEQ**, select a lane, toggle steps, and start the one-bar 1/16 sequence.
+5. Open **TAPE**, arm any of the four tracks, press **REC**, perform or run the sequence, then press **STOP**. Use mute, solo, and volume to shape the mix.
+6. Open **FX** and adjust reverb, delay, saturation, and wow. Effects are live and print to new tape recordings.
+7. **PLAY** plays the audible tape mix. **BOUNCE MIX → WAV** downloads it as a 48 kHz, 16-bit stereo WAV.
 
 If you hear noticeable latency, you're probably on Bluetooth audio (AirPods etc.). Wired or built-in speakers feel much tighter, this is a platform limitation, not an app bug.
 
@@ -50,8 +51,8 @@ If you hear noticeable latency, you're probably on Bluetooth audio (AirPods etc.
 - `apps/desktop` Tauri 2 wrapper for macOS
 
 If you want to read rather than run, start with `packages/model/src/music.ts` for the chord and scale
-theory, and `packages/engine/src/AudioEngine.ts` for the audio graph. The tape track is
-`packages/engine/src/ringbuffer.ts` and the export path is `wav.ts`. Those four carry the ideas.
+theory, and `packages/engine/src/AudioEngine.ts` for the audio graph. The tape, sequencer, and
+effects DSP live in `packages/engine/src/worklet/processor.ts`; the export path is `wav.ts`.
 
 ## How this was built
 

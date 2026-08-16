@@ -1,5 +1,11 @@
 import type { NoteEvent, QuantizeSettings } from "@pocket/model";
 import type { MacroValues } from "../macros";
+import type { FxValues } from "../fx";
+
+export interface SequenceNote {
+  voiceId: string;
+  midi: number;
+}
 
 // Messages from main thread → worklet
 export type MainToWorklet =
@@ -17,11 +23,20 @@ export type MainToWorklet =
       bpm: number;
       quantize: QuantizeSettings;
       regionStartSample: number;
+      gain?: number;
       envelopeMs: { attack: number; release: number };
     }
   | { type: "set-metronome"; on: boolean }
   | { type: "set-bpm"; bpm: number }
   | { type: "set-macros"; values: Pick<MacroValues, "shape" | "filter"> }
+  | { type: "set-fx"; values: FxValues }
+  | {
+      type: "set-sequence";
+      running: boolean;
+      bpm: number;
+      steps: SequenceNote[][];
+      envelopeMs: { attack: number; release: number };
+    }
   | { type: "stop-playback" };
 
 // Messages from worklet → main thread
@@ -31,4 +46,5 @@ export type WorkletToMain =
   | { type: "region-data"; requestId: number; left: Float32Array; right: Float32Array }
   | { type: "region-error"; requestId: number; message: string }
   | { type: "playback-state"; playing: boolean }
+  | { type: "sequence-step"; step: number }
   | { type: "log"; level: "info" | "warn" | "error"; msg: string };

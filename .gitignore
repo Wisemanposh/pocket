@@ -35,3 +35,8 @@ CLAUDE.md
 .cursor/
 .github/copilot-instructions.md
 docs/superpowers/
+
+# Browser automation scratch
+.playwright-cli/
+.playwright-mcp/
+output/

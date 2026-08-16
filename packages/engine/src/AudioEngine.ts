@@ -7,7 +7,9 @@ import {
   releaseMsFromMacro,
   type MacroValues,
 } from "./macros";
-import type { MainToWorklet, WorkletToMain } from "./worklet/messages";
+import { DEFAULT_FX, type FxValues } from "./fx";
+import { mixStereoTracks } from "./mix";
+import type { MainToWorklet, SequenceNote, WorkletToMain } from "./worklet/messages";
 
 // Vite-specific: import the worklet entry as a URL.
 import workletUrl from "./worklet/processor.ts?worker&url";
@@ -20,10 +22,19 @@ export interface PlaybackListener {
   (playing: boolean): void;
 }
 
+export interface SequenceStepListener {
+  (step: number): void;
+}
+
 interface PendingFetch {
   resolve: (data: { left: Float32Array; right: Float32Array }) => void;
   reject: (error: Error) => void;
   timeout: ReturnType<typeof setTimeout>;
+}
+
+export interface RegionPlayback {
+  region: Region;
+  gain: number;
 }
 
 export class AudioEngine {
@@ -31,7 +42,9 @@ export class AudioEngine {
   private node: AudioWorkletNode | null = null;
   private regionListeners = new Set<RegionListener>();
   private playbackListeners = new Set<PlaybackListener>();
+  private sequenceStepListeners = new Set<SequenceStepListener>();
   private rawPlaybackSources = new Set<AudioBufferSourceNode>();
+  private playbackGeneration = 0;
   private nextNoteId = 1;
 
   private nextRequestId = 1;
@@ -41,6 +54,7 @@ export class AudioEngine {
   attackMs = attackMsFromMacro(DEFAULT_MACROS.attack);
   releaseMs = releaseMsFromMacro(DEFAULT_MACROS.release);
   macros: MacroValues = { ...DEFAULT_MACROS };
+  fx: FxValues = { ...DEFAULT_FX };
 
   // v0.2 — current settings used for playback + metronome scheduling
   quantize: QuantizeSettings = { strength: 0.75, gridDivision: "1/8" };
@@ -67,6 +81,7 @@ export class AudioEngine {
         type: "set-macros",
         values: { shape: this.macros.shape, filter: this.macros.filter },
       });
+      this.send({ type: "set-fx", values: this.fx });
       if (ctx.state !== "running") await ctx.resume();
     } catch (error) {
       this.node?.disconnect();
@@ -143,7 +158,30 @@ export class AudioEngine {
     });
   }
 
-  async playRegionWithQuantize(region: import("@pocket/model").Region): Promise<void> {
+  setFx(values: FxValues): void {
+    this.fx = {
+      reverb: clampMacro(values.reverb),
+      delay: clampMacro(values.delay),
+      saturation: clampMacro(values.saturation),
+      wow: clampMacro(values.wow),
+    };
+    this.send({ type: "set-fx", values: this.fx });
+  }
+
+  setSequence(running: boolean, steps: SequenceNote[][]): void {
+    this.send({
+      type: "set-sequence",
+      running,
+      bpm: this.bpm,
+      steps: steps.slice(0, 16).map((step) => step.slice(0, 8)),
+      envelopeMs: { attack: this.attackMs, release: this.releaseMs },
+    });
+  }
+
+  async playRegionWithQuantize(
+    region: import("@pocket/model").Region,
+    gain = region.gain
+  ): Promise<void> {
     if (!this.ctx) throw new Error("AudioEngine not started");
     if (region.notes.length === 0) {
       await this.playRegion(region);
@@ -155,6 +193,7 @@ export class AudioEngine {
       bpm: this.bpm,
       quantize: this.quantize,
       regionStartSample: region.startSample,
+      gain: Number.isFinite(gain) ? Math.max(0, Math.min(2, gain)) : 1,
       envelopeMs: { attack: this.attackMs, release: this.releaseMs },
     });
   }
@@ -182,6 +221,11 @@ export class AudioEngine {
     return () => this.playbackListeners.delete(fn);
   }
 
+  onSequenceStep(fn: SequenceStepListener): () => void {
+    this.sequenceStepListeners.add(fn);
+    return () => this.sequenceStepListeners.delete(fn);
+  }
+
   async fetchRegion(region: Region): Promise<{ left: Float32Array; right: Float32Array }> {
     const requestId = this.nextRequestId++;
     return new Promise((resolve, reject) => {
@@ -200,26 +244,45 @@ export class AudioEngine {
   }
 
   async playRegion(region: Region): Promise<void> {
+    await this.playRegions([{ region, gain: region.gain }]);
+  }
+
+  async playRegions(tracks: RegionPlayback[]): Promise<void> {
     if (!this.ctx) throw new Error("AudioEngine not started");
     this.stopPlayback();
-    const { left, right } = await this.fetchRegion(region);
-    const sampleRate = this.ctx.sampleRate;
-    const buffer = this.ctx.createBuffer(2, left.length, sampleRate);
-    buffer.copyToChannel(left, 0);
-    buffer.copyToChannel(right, 1);
-    const src = this.ctx.createBufferSource();
-    src.buffer = buffer;
-    src.connect(this.ctx.destination);
-    this.rawPlaybackSources.add(src);
-    src.onended = () => {
-      this.rawPlaybackSources.delete(src);
-      if (this.rawPlaybackSources.size === 0) this.notifyPlayback(false);
-    };
+    if (tracks.length === 0) return;
+    const generation = this.playbackGeneration;
+    const audio = await Promise.all(
+      tracks.map(async ({ region, gain }) => ({ ...(await this.fetchRegion(region)), gain }))
+    );
+    if (generation !== this.playbackGeneration) return;
+    const startAt = this.ctx.currentTime + 0.02;
+    for (const track of audio) {
+      const buffer = this.ctx.createBuffer(2, track.left.length, this.ctx.sampleRate);
+      buffer.copyToChannel(track.left, 0);
+      buffer.copyToChannel(track.right, 1);
+      const source = this.ctx.createBufferSource();
+      const gainNode = this.ctx.createGain();
+      source.buffer = buffer;
+      gainNode.gain.value = Number.isFinite(track.gain)
+        ? Math.max(0, Math.min(2, track.gain))
+        : 1;
+      source.connect(gainNode);
+      gainNode.connect(this.ctx.destination);
+      this.rawPlaybackSources.add(source);
+      source.onended = () => {
+        this.rawPlaybackSources.delete(source);
+        source.disconnect();
+        gainNode.disconnect();
+        if (this.rawPlaybackSources.size === 0) this.notifyPlayback(false);
+      };
+      source.start(startAt);
+    }
     this.notifyPlayback(true);
-    src.start();
   }
 
   stopPlayback(): void {
+    this.playbackGeneration++;
     if (this.node) this.send({ type: "stop-playback" });
     for (const source of this.rawPlaybackSources) {
       try {
@@ -233,8 +296,16 @@ export class AudioEngine {
   }
 
   async exportRegionAsWav(region: Region): Promise<Uint8Array> {
+    return this.exportRegionsAsWav([{ region, gain: region.gain }]);
+  }
+
+  async exportRegionsAsWav(tracks: RegionPlayback[]): Promise<Uint8Array> {
     if (!this.ctx) throw new Error("AudioEngine not started");
-    const { left, right } = await this.fetchRegion(region);
+    if (tracks.length === 0) throw new Error("There are no audible tape tracks to bounce.");
+    const audio = await Promise.all(
+      tracks.map(async ({ region, gain }) => ({ ...(await this.fetchRegion(region)), gain }))
+    );
+    const { left, right } = mixStereoTracks(audio);
     const { encodeWav } = await import("./wav");
     return encodeWav({
       sampleRate: this.ctx.sampleRate,
@@ -251,6 +322,7 @@ export class AudioEngine {
     }
     this.pendingFetches.clear();
     this.playbackListeners.clear();
+    this.sequenceStepListeners.clear();
     this.regionListeners.clear();
     this.node?.disconnect();
     this.node = null;
@@ -307,6 +379,9 @@ export class AudioEngine {
       }
       case "playback-state":
         this.notifyPlayback(msg.playing);
+        return;
+      case "sequence-step":
+        this.sequenceStepListeners.forEach((fn) => fn(msg.step));
         return;
     }
   }

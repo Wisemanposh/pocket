@@ -13,3 +13,6 @@ export * from "./KeyPicker";
 export * from "./BpmPicker";
 export * from "./tap_tempo";
 export * from "./VoicePicker";
+export * from "./TapeMode";
+export * from "./Sequencer";
+export * from "./FxPanel";

@@ -19,6 +19,10 @@
   flex-direction: column;
   gap: 12px;
 }
+.modeSurface {
+  min-height: 220px;
+}
+.modeSurface > :first-child { margin-top: 0; }
 .label {
   font-family: var(--device-font);
   font-size: 9px;

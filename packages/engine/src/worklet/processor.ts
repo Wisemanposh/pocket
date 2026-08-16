@@ -33,7 +33,8 @@ interface ActiveNote {
   env: Envelope;
   released: boolean;
   exhausted: boolean;
-  source: "live" | "playback";
+  source: "live" | "playback" | "sequence";
+  gain: number;
 }
 
 type ScheduledEvent =
@@ -44,16 +45,22 @@ type ScheduledEvent =
       voiceId: string;
       midi: number;
       envMs: { attack: number; release: number };
+      source: ActiveNote["source"];
+      gain: number;
     }
-  | { atSample: number; kind: "off"; noteId: number };
+  | { atSample: number; kind: "off"; noteId: number; source: ActiveNote["source"] };
 
 function midiToFreqRatio(target: number, root: number): number {
   return Math.pow(2, (target - root) / 12);
 }
 
 function toInt16(sample: number): number {
-  const clamped = Math.max(-1, Math.min(1, sample));
+  const clamped = Number.isFinite(sample) ? Math.max(-1, Math.min(1, sample)) : 0;
   return Math.round(clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff);
+}
+
+function clampOutput(sample: number): number {
+  return Number.isFinite(sample) ? Math.max(-1, Math.min(1, sample)) : 0;
 }
 
 class PocketProcessor extends AudioWorkletProcessor {
@@ -78,6 +85,15 @@ class PocketProcessor extends AudioWorkletProcessor {
   private nextPlaybackNoteId = -1;
   private playing = false;
 
+  private sequenceRunning = false;
+  private sequenceSteps: import("./messages").SequenceNote[][] = Array.from(
+    { length: 16 },
+    () => []
+  );
+  private sequenceStep = 0;
+  private nextSequenceSample = 0;
+  private sequenceEnvelope = { attack: 5, release: 80 };
+
   private metronomeOn = false;
   private metronomeBpm = 92;
   private clickPhase = -1;
@@ -90,6 +106,18 @@ class PocketProcessor extends AudioWorkletProcessor {
   private filter = 1;
   private filterStateL = 0;
   private filterStateR = 0;
+
+  private fxReverb = 0;
+  private fxDelay = 0;
+  private fxSaturation = 0;
+  private fxWow = 0;
+  private readonly delayL = new Float32Array(Math.max(2, Math.round(sampleRate * 2)));
+  private readonly delayR = new Float32Array(Math.max(2, Math.round(sampleRate * 2)));
+  private delayWrite = 0;
+  private readonly reverbL = new Float32Array(Math.max(2, Math.round(sampleRate * 0.173)));
+  private readonly reverbR = new Float32Array(Math.max(2, Math.round(sampleRate * 0.227)));
+  private reverbWriteL = 0;
+  private reverbWriteR = 0;
 
   private voices = new Map<string, LoadedVoice>();
   private active: ActiveNote[] = [];
@@ -115,7 +143,8 @@ class PocketProcessor extends AudioWorkletProcessor {
     voiceId: string,
     midi: number,
     envelopeMs: { attack: number; release: number },
-    source: ActiveNote["source"]
+    source: ActiveNote["source"],
+    gain = 1
   ): void {
     const voice = this.voices.get(voiceId);
     if (!voice) return;
@@ -135,8 +164,9 @@ class PocketProcessor extends AudioWorkletProcessor {
       released: false,
       exhausted: false,
       source,
+      gain: Number.isFinite(gain) ? Math.max(0, Math.min(2, gain)) : 1,
     });
-    if (this.recording && source === "live") {
+    if (this.recording && source !== "playback") {
       this.openNotes.set(noteId, { voiceId, midi, startSample: this.totalWritten });
     }
   }
@@ -160,7 +190,7 @@ class PocketProcessor extends AudioWorkletProcessor {
   }
 
   private stopPlayback(): void {
-    this.scheduled = [];
+    this.scheduled = this.scheduled.filter((event) => event.source !== "playback");
     this.active = this.active.filter((note) => note.source !== "playback");
     this.setPlaying(false);
   }
@@ -194,7 +224,7 @@ class PocketProcessor extends AudioWorkletProcessor {
         this.recordedNotes = [];
         this.openNotes.clear();
         for (const note of this.active) {
-          if (note.source === "live" && !note.released) {
+          if (note.source !== "playback" && !note.released) {
             this.openNotes.set(note.noteId, {
               voiceId: note.voiceId,
               midi: note.midi,
@@ -290,11 +320,14 @@ class PocketProcessor extends AudioWorkletProcessor {
             voiceId: note.voiceId,
             midi: note.midi,
             envMs: msg.envelopeMs,
+            source: "playback",
+            gain: msg.gain ?? 1,
           });
           this.scheduled.push({
             atSample: fireAtBase + Math.max(1, Math.round(safeEnd)),
             kind: "off",
             noteId,
+            source: "playback",
           });
         }
         this.scheduled.sort((a, b) => a.atSample - b.atSample);
@@ -325,6 +358,42 @@ class PocketProcessor extends AudioWorkletProcessor {
           ? Math.max(0, Math.min(1, msg.values.filter))
           : 1;
         return;
+      case "set-fx":
+        this.fxReverb = Number.isFinite(msg.values.reverb)
+          ? Math.max(0, Math.min(1, msg.values.reverb))
+          : 0;
+        this.fxDelay = Number.isFinite(msg.values.delay)
+          ? Math.max(0, Math.min(1, msg.values.delay))
+          : 0;
+        this.fxSaturation = Number.isFinite(msg.values.saturation)
+          ? Math.max(0, Math.min(1, msg.values.saturation))
+          : 0;
+        this.fxWow = Number.isFinite(msg.values.wow)
+          ? Math.max(0, Math.min(1, msg.values.wow))
+          : 0;
+        return;
+      case "set-sequence": {
+        this.sequenceSteps = Array.from({ length: 16 }, (_, index) =>
+          (msg.steps[index] ?? []).slice(0, 8)
+        );
+        this.metronomeBpm = Number.isFinite(msg.bpm)
+          ? Math.max(40, Math.min(240, msg.bpm))
+          : this.metronomeBpm;
+        this.sequenceEnvelope = msg.envelopeMs;
+        if (msg.running && !this.sequenceRunning) {
+          this.sequenceStep = 0;
+          this.nextSequenceSample = this.totalWritten;
+        }
+        this.sequenceRunning = msg.running;
+        if (!msg.running) {
+          this.scheduled = this.scheduled.filter((event) => event.source !== "sequence");
+          for (const note of this.active) {
+            if (note.source === "sequence" && !note.released) this.releaseNote(note.noteId);
+          }
+          this.send({ type: "sequence-step", step: -1 });
+        }
+        return;
+      }
       default:
         return;
     }
@@ -332,7 +401,7 @@ class PocketProcessor extends AudioWorkletProcessor {
 
   private fireScheduled(event: ScheduledEvent): void {
     if (event.kind === "on") {
-      this.addNote(event.noteId, event.voiceId, event.midi, event.envMs, "playback");
+      this.addNote(event.noteId, event.voiceId, event.midi, event.envMs, event.source, event.gain);
     } else {
       this.releaseNote(event.noteId);
     }
@@ -350,9 +419,34 @@ class PocketProcessor extends AudioWorkletProcessor {
     const cutoff = Math.min(sampleRate * 0.45, filterHzFromMacro(this.filter));
     const filterAlpha = 1 - Math.exp((-2 * Math.PI * cutoff) / sampleRate);
     const samplesPerBeat = Math.max(1, Math.round((60 / this.metronomeBpm) * sampleRate));
+    const sequenceStepSamples = Math.max(1, Math.round(samplesPerBeat / 4));
 
     for (let frame = 0; frame < numFrames; frame++) {
       const absoluteSample = this.totalWritten;
+      if (this.sequenceRunning && absoluteSample >= this.nextSequenceSample) {
+        const notes = this.sequenceSteps[this.sequenceStep] ?? [];
+        this.send({ type: "sequence-step", step: this.sequenceStep });
+        for (const note of notes) {
+          const noteId = this.nextPlaybackNoteId--;
+          this.addNote(
+            noteId,
+            note.voiceId,
+            note.midi,
+            this.sequenceEnvelope,
+            "sequence",
+            1
+          );
+          this.scheduled.push({
+            atSample: absoluteSample + Math.max(1, Math.round(sequenceStepSamples * 0.72)),
+            kind: "off",
+            noteId,
+            source: "sequence",
+          });
+        }
+        this.scheduled.sort((first, second) => first.atSample - second.atSample);
+        this.sequenceStep = (this.sequenceStep + 1) % 16;
+        this.nextSequenceSample += sequenceStepSamples;
+      }
       while (this.scheduled.length > 0 && this.scheduled[0]!.atSample <= absoluteSample) {
         this.fireScheduled(this.scheduled.shift()!);
       }
@@ -380,10 +474,16 @@ class PocketProcessor extends AudioWorkletProcessor {
         const fraction = note.position - index0;
         const sample =
           voice.samples[index0]! * (1 - fraction) + voice.samples[index1]! * fraction;
-        const value = sample * note.env.next();
+        const value = sample * note.env.next() * note.gain;
         sampleL += value;
         sampleR += value;
-        note.position += note.rate;
+        const time = absoluteSample / sampleRate;
+        const wow =
+          1 +
+          this.fxWow *
+            (0.008 * Math.sin(2 * Math.PI * 0.7 * time) +
+              0.0025 * Math.sin(2 * Math.PI * 6.1 * time));
+        note.position += note.rate * wow;
       }
 
       sampleL = shapeSample(sampleL, this.shape);
@@ -392,6 +492,40 @@ class PocketProcessor extends AudioWorkletProcessor {
       this.filterStateR += filterAlpha * (sampleR - this.filterStateR);
       sampleL = this.filterStateL;
       sampleR = this.filterStateR;
+
+      if (this.fxSaturation > 0) {
+        const drive = 1 + this.fxSaturation * 12;
+        const normalization = Math.tanh(drive);
+        sampleL = Math.tanh(sampleL * drive) / normalization;
+        sampleR = Math.tanh(sampleR * drive) / normalization;
+      }
+
+      if (this.fxDelay > 0) {
+        const delaySamples = Math.max(
+          1,
+          Math.min(this.delayL.length - 1, Math.round(samplesPerBeat * 0.75))
+        );
+        const read = (this.delayWrite - delaySamples + this.delayL.length) % this.delayL.length;
+        const delayedL = this.delayL[read]!;
+        const delayedR = this.delayR[read]!;
+        this.delayL[this.delayWrite] = sampleL + delayedR * (0.2 + this.fxDelay * 0.45);
+        this.delayR[this.delayWrite] = sampleR + delayedL * (0.2 + this.fxDelay * 0.45);
+        sampleL += delayedL * this.fxDelay * 0.65;
+        sampleR += delayedR * this.fxDelay * 0.65;
+        this.delayWrite = (this.delayWrite + 1) % this.delayL.length;
+      }
+
+      if (this.fxReverb > 0) {
+        const wetL = this.reverbL[this.reverbWriteL]!;
+        const wetR = this.reverbR[this.reverbWriteR]!;
+        const feedback = 0.45 + this.fxReverb * 0.42;
+        this.reverbL[this.reverbWriteL] = sampleL + wetR * feedback;
+        this.reverbR[this.reverbWriteR] = sampleR + wetL * feedback;
+        sampleL += wetL * this.fxReverb * 0.55;
+        sampleR += wetR * this.fxReverb * 0.55;
+        this.reverbWriteL = (this.reverbWriteL + 1) % this.reverbL.length;
+        this.reverbWriteR = (this.reverbWriteR + 1) % this.reverbR.length;
+      }
 
       // Tape captures the instrument bus, not the monitoring metronome.
       this.ringL[this.ringWritePos] = toInt16(sampleL);
@@ -422,8 +556,8 @@ class PocketProcessor extends AudioWorkletProcessor {
         if (this.clickPhase >= this.clickDurSamples) this.clickPhase = -1;
       }
 
-      left[frame] = sampleL;
-      right[frame] = sampleR;
+      left[frame] = clampOutput(sampleL);
+      right[frame] = clampOutput(sampleR);
       this.ringWritePos = (this.ringWritePos + 1) % this.ringCapacity;
       this.totalWritten++;
     }

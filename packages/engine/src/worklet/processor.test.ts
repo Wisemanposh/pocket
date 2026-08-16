@@ -192,4 +192,75 @@ describe("PocketProcessor", () => {
     send(processor, { type: "stop-playback" });
     expect(latest(processor, "playback-state")?.playing).toBe(false);
   });
+
+  it("runs a 16-step sequence and records its generated notes", () => {
+    const processor = new Processor();
+    loadVoice(processor);
+    const steps = Array.from({ length: 16 }, () => [] as Array<{ voiceId: string; midi: number }>);
+    steps[0] = [{ voiceId: "dx-piano", midi: 60 }];
+    send(processor, {
+      type: "set-sequence",
+      running: true,
+      bpm: 120,
+      steps,
+      envelopeMs: { attack: 0, release: 5 },
+    });
+    send(processor, { type: "rec-start" });
+    render(processor, 140);
+    send(processor, { type: "rec-stop" });
+    send(processor, {
+      type: "set-sequence",
+      running: false,
+      bpm: 120,
+      steps,
+      envelopeMs: { attack: 0, release: 5 },
+    });
+
+    expect(latest(processor, "sequence-step")?.step).toBe(-1);
+    expect(latest(processor, "rec-region")?.notes[0]).toMatchObject({
+      voiceId: "dx-piano",
+      midi: 60,
+      rawStartSample: 0,
+    });
+  });
+
+  it("applies audible delay FX while preserving a bounded output", () => {
+    const processor = new Processor();
+    loadVoice(processor, 5);
+    send(processor, {
+      type: "set-fx",
+      values: { reverb: 0, delay: 1, saturation: 0.5, wow: 0 },
+    });
+    send(processor, {
+      type: "note-on",
+      noteId: 10,
+      voiceId: "dx-piano",
+      midi: 60,
+      envelopeMs: { attack: 0, release: 5 },
+    });
+    const [left] = render(processor, 500);
+    expect(Array.from(left).some((sample, index) => index > 250 && Math.abs(sample) > 0)).toBe(true);
+    expect(Array.from(left).every((sample) => Number.isFinite(sample))).toBe(true);
+    expect(Array.from(left).every((sample) => Math.abs(sample) <= 1)).toBe(true);
+  });
+
+  it("applies tape-track gain to quantized event playback", () => {
+    const renderAtGain = (gain: number) => {
+      const processor = new Processor();
+      loadVoice(processor);
+      send(processor, { type: "set-macros", values: { shape: 0, filter: 1 } });
+      send(processor, {
+        type: "play-events",
+        notes: [{ voiceId: "dx-piano", midi: 60, rawStartSample: 0, rawEndSample: 10 }],
+        bpm: 120,
+        quantize: { strength: 0, gridDivision: "1/8" },
+        regionStartSample: 0,
+        gain,
+        envelopeMs: { attack: 0, release: 5 },
+      });
+      return render(processor, 2)[0][1]!;
+    };
+
+    expect(renderAtGain(0.5)).toBeCloseTo(renderAtGain(1) * 0.5);
+  });
 });

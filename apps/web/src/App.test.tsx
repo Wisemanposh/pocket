@@ -2,8 +2,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Region } from "@pocket/model";
-import { DEFAULT_MACROS } from "@pocket/engine";
-import { useAppStore } from "./store";
+import { DEFAULT_FX, DEFAULT_MACROS } from "@pocket/engine";
+import { createSequenceGrid, createTapeTracks, useAppStore } from "./store";
 
 const mock = vi.hoisted(() => {
   let nextNoteId = 1;
@@ -22,15 +22,20 @@ const mock = vi.hoisted(() => {
     setQuantize = vi.fn();
     setMetronome = vi.fn();
     setMacros = vi.fn();
+    setFx = vi.fn();
+    setSequence = vi.fn();
     noteOn = vi.fn(() => nextNoteId++);
     noteOff = vi.fn();
     startRecording = vi.fn();
     stopRecording = vi.fn();
     playRegionWithQuantize = vi.fn(async () => undefined);
+    playRegions = vi.fn(async () => undefined);
     stopPlayback = vi.fn();
     exportRegionAsWav = vi.fn(async () => new Uint8Array(44));
+    exportRegionsAsWav = vi.fn(async () => new Uint8Array(44));
     regionListener: ((region: Region & { trackId: number }) => void) | null = null;
     playbackListener: ((playing: boolean) => void) | null = null;
+    sequenceStepListener: ((step: number) => void) | null = null;
 
     constructor() {
       instances.push(this);
@@ -47,6 +52,13 @@ const mock = vi.hoisted(() => {
       this.playbackListener = listener;
       return () => {
         this.playbackListener = null;
+      };
+    }
+
+    onSequenceStep(listener: (step: number) => void) {
+      this.sequenceStepListener = listener;
+      return () => {
+        this.sequenceStepListener = null;
       };
     }
   }
@@ -105,11 +117,18 @@ beforeEach(() => {
     tonicMidi: 60,
     bpm: 92,
     voiceId: "dx-piano",
+    mode: "CHRD",
     recording: false,
-    lastRegion: null,
     metronome: false,
     quantize: { strength: 0.75, gridDivision: "1/8" },
     macros: { ...DEFAULT_MACROS },
+    fx: { ...DEFAULT_FX },
+    tracks: createTapeTracks(),
+    activeTrackId: 1,
+    sequenceGrid: createSequenceGrid(),
+    sequenceLane: 0,
+    sequenceStep: -1,
+    sequenceRunning: false,
   });
 });
 
@@ -123,6 +142,7 @@ describe("App", () => {
     expect(engine.setBpm).toHaveBeenCalledWith(92);
     expect(engine.setQuantize).toHaveBeenCalledWith({ strength: 0.75, gridDivision: "1/8" });
     expect(engine.setMacros).toHaveBeenCalledWith(DEFAULT_MACROS);
+    expect(engine.setFx).toHaveBeenCalledWith(DEFAULT_FX);
   });
 
   it("releases only the note identities owned by a pad", async () => {
@@ -151,7 +171,7 @@ describe("App", () => {
     act(() => engine.regionListener?.(region));
     await waitFor(() => expect(screen.getByRole("button", { name: "play" }).hasAttribute("disabled")).toBe(false));
     await user.click(screen.getByRole("button", { name: "play" }));
-    expect(engine.playRegionWithQuantize).toHaveBeenCalledWith(region);
+    expect(engine.playRegionWithQuantize).toHaveBeenCalledWith(region, 1);
 
     act(() => engine.playbackListener?.(true));
     await waitFor(() => expect(screen.getByRole("button", { name: "stop" }).hasAttribute("disabled")).toBe(false));
@@ -166,6 +186,70 @@ describe("App", () => {
     expect(engine.setMacros).toHaveBeenLastCalledWith({
       ...DEFAULT_MACROS,
       filter: 0.95,
+    });
+  });
+
+  it("runs and edits the step sequencer", async () => {
+    const engine = await boot();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "SEQ" }));
+    expect(screen.getByRole("region", { name: "step sequencer" })).toBeTruthy();
+
+    const step2 = screen.getByRole("button", { name: "step 2" });
+    expect(step2.getAttribute("aria-pressed")).toBe("false");
+    await user.click(step2);
+    expect(step2.getAttribute("aria-pressed")).toBe("true");
+
+    await user.click(screen.getByRole("button", { name: "start sequence" }));
+    expect(engine.setSequence).toHaveBeenLastCalledWith(true, expect.any(Array));
+    expect(engine.setSequence.mock.calls.at(-1)?.[1]).toHaveLength(16);
+
+    act(() => engine.sequenceStepListener?.(3));
+    await waitFor(() => expect(screen.getByText(/SEQ 04/)).toBeTruthy());
+    await user.click(screen.getByRole("button", { name: "stop sequence" }));
+    expect(engine.setSequence).toHaveBeenLastCalledWith(false, expect.any(Array));
+  });
+
+  it("arms, records, mixes, and clears all four tape tracks", async () => {
+    const engine = await boot();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "TAPE" }));
+    expect(screen.getByRole("region", { name: "tape tracks" })).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "arm BASS" }));
+    expect(engine.setActiveTrack).toHaveBeenLastCalledWith(2);
+    await user.click(screen.getByRole("button", { name: "rec" }));
+    act(() => engine.regionListener?.({ ...region, trackId: 2 }));
+    await user.click(screen.getByRole("button", { name: "stop" }));
+    await waitFor(() => expect(screen.getByLabelText("BASS 0.1s")).toBeTruthy());
+
+    await user.click(screen.getByRole("button", { name: "mute BASS" }));
+    expect(screen.getByRole("button", { name: "mute BASS" }).getAttribute("aria-pressed")).toBe("true");
+    await user.click(screen.getByRole("button", { name: "solo BASS" }));
+    expect(screen.getByRole("button", { name: "solo BASS" }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.change(screen.getByRole("slider", { name: "volume BASS" }), { target: { value: "0.65" } });
+    expect(useAppStore.getState().tracks[1]?.volume).toBe(0.65);
+
+    await user.click(screen.getByRole("button", { name: "clear BASS" }));
+    expect(screen.getByLabelText("BASS EMPTY")).toBeTruthy();
+    expect(engine.stopPlayback).toHaveBeenCalled();
+  });
+
+  it("applies all master effects live", async () => {
+    const engine = await boot();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "FX" }));
+    expect(screen.getByRole("region", { name: "master effects" })).toBeTruthy();
+
+    fireEvent.keyDown(screen.getByRole("slider", { name: "REVERB" }), { key: "ArrowUp" });
+    fireEvent.keyDown(screen.getByRole("slider", { name: "DELAY" }), { key: "ArrowUp" });
+    fireEvent.keyDown(screen.getByRole("slider", { name: "SAT" }), { key: "ArrowUp" });
+    fireEvent.keyDown(screen.getByRole("slider", { name: "WOW" }), { key: "ArrowUp" });
+    expect(engine.setFx).toHaveBeenLastCalledWith({
+      reverb: 0.05,
+      delay: 0.05,
+      saturation: 0.05,
+      wow: 0.05,
     });
   });
 
